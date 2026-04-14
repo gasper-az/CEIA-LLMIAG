@@ -16,6 +16,7 @@ import time
 import numpy as np
 from typing import List, Dict, Any, Tuple
 import pinecone
+from pinecone import Pinecone, PodSpec
 from sentence_transformers import SentenceTransformer
 import openai
 
@@ -41,16 +42,16 @@ def configurar_pinecone():
         raise ValueError("PINECONE_API_KEY no está configurada en las variables de entorno")
     
     # Inicializar Pinecone
-    pinecone.init(
+    pc = Pinecone(
         api_key=api_key,
         environment=environment
     )
     
     print(f"✅ Pinecone configurado correctamente en {environment}")
-    return True
+    return pc
 
 
-def crear_indice(nombre_indice: str, dimension: int = 384, metrica: str = "cosine"):
+def crear_indice(pinecone_client: Pinecone, nombre_indice: str, dimension: int = 384, metrica: str = "cosine"):
     """
     Crea un nuevo índice en Pinecone.
     
@@ -79,25 +80,29 @@ def crear_indice(nombre_indice: str, dimension: int = 384, metrica: str = "cosin
     """
     
     # Verificar si el índice ya existe
-    indices_existentes = pinecone.list_indexes()
+    # indices_existentes = pinecone.list_indexes()
+    indices_existentes = pinecone_client.list_indexes()
     
     if nombre_indice in indices_existentes:
         print(f"⚠️  El índice '{nombre_indice}' ya existe")
         return True
     
+    podSpec = PodSpec(pods=1, replicas=1, pod_type="p1.x1", environment="us-west1-gcp")
+
     # Crear el índice
-    pinecone.create_index(
+    pinecone_client.create_index(
         name=nombre_indice,
         dimension=dimension,
         metric=metrica,
-        pods=1,  # Pods: Unidades de cómputo que procesan queries. Más pods = mayor throughput pero mayor costo
-        replicas=1,  # Réplicas: Copias del índice para alta disponibilidad. Más réplicas = mayor disponibilidad
-        pod_type="p1.x1"  # Tipo de pod: p1.x1 (gratuito, 1 vCPU), p1.x2 (2 vCPU), p2.x1 (optimizado), etc.
+        spec=podSpec
+        # pods=1,  # Pods: Unidades de cómputo que procesan queries. Más pods = mayor throughput pero mayor costo
+        # replicas=1,  # Réplicas: Copias del índice para alta disponibilidad. Más réplicas = mayor disponibilidad
+        # pod_type="p1.x1"  # Tipo de pod: p1.x1 (gratuito, 1 vCPU), p1.x2 (2 vCPU), p2.x1 (optimizado), etc.
     )
     
     # Esperar a que el índice esté listo
     print(f"🔄 Creando índice '{nombre_indice}'...")
-    while nombre_indice not in pinecone.list_indexes():
+    while nombre_indice not in pinecone_client.list_indexes():
         time.sleep(1)
     
     print(f"✅ Índice '{nombre_indice}' creado exitosamente")
@@ -157,7 +162,7 @@ class GeneradorEmbeddings:
 # 3. POBLACIÓN DEL ÍNDICE
 # ================================
 
-def poblar_indice_ejemplo(nombre_indice: str, generador: GeneradorEmbeddings):
+def poblar_indice_ejemplo(pinecone_client: Pinecone, nombre_indice: str, generador: GeneradorEmbeddings):
     """
     Puebla el índice con datos de ejemplo.
     
@@ -167,40 +172,22 @@ def poblar_indice_ejemplo(nombre_indice: str, generador: GeneradorEmbeddings):
     """
     
     # Conectar al índice
-    indice = pinecone.Index(nombre_indice)
+    indice = pinecone_client.Index(nombre_indice)
     
     # Datos de ejemplo: documentos sobre inteligencia artificial
     documentos_ejemplo = [
         {
             "id": "doc_001",
-            "texto": "La inteligencia artificial es una rama de la informática que busca crear máquinas capaces de realizar tareas que normalmente requieren inteligencia humana.",
+            "texto": "Nombre: Gaspar | Apellido: Acevedo Zain | Fecha Nacimiento: 19/01/1993 | Experiencia 1: Lugar de trabajo 1, realizando tareas de desarollo con C# | Experiencia 2: Lugar de trabajo 2, realizando tareas de desarollo con Java | Experiencia 3: Lugar de trabajo 3, realizando tareas de desarollo con Javascript, C#, SQL.",
             "categoria": "definicion",
             "fecha": "2024-01-15"
         },
         {
             "id": "doc_002", 
-            "texto": "Los modelos de lenguaje grandes como GPT-4 utilizan arquitecturas transformer para procesar y generar texto de manera coherente.",
+            "texto": "Nombre: Carlos | Apellido: Villalobos | Fecha Nacimiento: 19/01/1985 | Experiencia 1: Lugar de trabajo 4, realizando tareas de desarollo con SQL, Python, VectorDB. | Experiencia 2: Lugar de trabajo 2, realizando tareas de desarollo con LLMs, Pytorch. | Experiencia 3: Lugar de trabajo 3, realizando tareas de desarollo con Kubernetes, Docker, LLMs, Scikit-learn.",
             "categoria": "modelos",
             "fecha": "2024-01-16"
         },
-        {
-            "id": "doc_003",
-            "texto": "El aprendizaje automático es un subconjunto de la IA que permite a las máquinas aprender patrones a partir de datos sin ser programadas explícitamente.",
-            "categoria": "machine_learning",
-            "fecha": "2024-01-17"
-        },
-        {
-            "id": "doc_004",
-            "texto": "Las redes neuronales artificiales están inspiradas en el funcionamiento del cerebro humano y consisten en capas de neuronas interconectadas.",
-            "categoria": "redes_neuronales",
-            "fecha": "2024-01-18"
-        },
-        {
-            "id": "doc_005",
-            "texto": "La búsqueda vectorial permite encontrar documentos similares comparando la distancia entre vectores en un espacio multidimensional.",
-            "categoria": "busqueda_vectorial",
-            "fecha": "2024-01-19"
-        }
     ]
     
     print(f"🔄 Poblando índice con {len(documentos_ejemplo)} documentos...")
@@ -242,6 +229,7 @@ def poblar_indice_ejemplo(nombre_indice: str, generador: GeneradorEmbeddings):
 # ================================
 
 def buscar_documentos_similares(
+        pinecone_client: Pinecone,
     nombre_indice: str, 
     consulta: str, 
     generador: GeneradorEmbeddings,
@@ -263,7 +251,7 @@ def buscar_documentos_similares(
     """
     
     # Conectar al índice
-    indice = pinecone.Index(nombre_indice)
+    indice = pinecone_client.Index(nombre_indice)
     
     # Generar embedding para la consulta
     print(f"🔍 Buscando documentos similares a: '{consulta}'")
@@ -306,7 +294,7 @@ def buscar_documentos_similares(
     return documentos_encontrados
 
 
-def buscar_con_filtros_ejemplo(nombre_indice: str, generador: GeneradorEmbeddings):
+def buscar_con_filtros_ejemplo(pinecone_client: Pinecone, nombre_indice: str, generador: GeneradorEmbeddings):
     """
     Demuestra búsquedas con filtros de metadata.
     
@@ -319,31 +307,34 @@ def buscar_con_filtros_ejemplo(nombre_indice: str, generador: GeneradorEmbedding
     print("=" * 50)
     
     # Búsqueda 1: Sin filtros
-    print("\n1️⃣ Búsqueda general sobre 'aprendizaje de máquinas':")
+    print("\n1️⃣ Lugares de trabajo de Carlos':")
     buscar_documentos_similares(
+        pinecone_client,
         nombre_indice, 
-        "aprendizaje de máquinas y algoritmos", 
+        "Donde trabajó Carlos?", 
         generador,
         top_k=3
     )
     
     # Búsqueda 2: Con filtro por categoría
-    print("\n2️⃣ Búsqueda filtrada por categoría 'modelos':")
+    print("\n2️⃣ Experiencia laboral de Gaspar:")
     filtro_categoria = {"categoria": {"$eq": "modelos"}}
     buscar_documentos_similares(
+        pinecone_client,
         nombre_indice,
-        "transformers y procesamiento de texto",
+        "En qué tiene experiencia Gaspar?",
         generador,
         top_k=2,
         filtro_metadata=filtro_categoria
     )
     
     # Búsqueda 3: Con filtro por fecha
-    print("\n3️⃣ Búsqueda de documentos recientes (después del 2024-01-17):")
+    print("\n3️⃣ Coincidieron en algún lugar de trabajo Carlos y Gaspar?:")
     filtro_fecha = {"fecha": {"$gte": "2024-01-17"}}
     buscar_documentos_similares(
+        pinecone_client,
         nombre_indice,
-        "redes neuronales y vectores",
+        "Coincidieron en algún lugar de trabajo Carlos y Gaspar?",
         generador,
         top_k=5,
         filtro_metadata=filtro_fecha
@@ -354,7 +345,7 @@ def buscar_con_filtros_ejemplo(nombre_indice: str, generador: GeneradorEmbedding
 # 5. GESTIÓN DEL ÍNDICE
 # ================================
 
-def obtener_estadisticas_indice(nombre_indice: str):
+def obtener_estadisticas_indice(pinecone_client: Pinecone, nombre_indice: str):
     """
     Muestra estadísticas detalladas del índice.
     
@@ -362,7 +353,7 @@ def obtener_estadisticas_indice(nombre_indice: str):
         nombre_indice (str): Nombre del índice
     """
     
-    indice = pinecone.Index(nombre_indice)
+    indice = pinecone_client.Index(nombre_indice)
     estadisticas = indice.describe_index_stats()
     
     print(f"\n📊 ESTADÍSTICAS DEL ÍNDICE '{nombre_indice}'")
@@ -446,28 +437,29 @@ def ejecutar_ejemplo_completo():
         print("=" * 50)
         
         # 1. Configurar conexión
-        configurar_pinecone()
+        pc = configurar_pinecone()
         
         # 2. Inicializar generador de embeddings
         generador = GeneradorEmbeddings()
         
         # 3. Crear índice
-        crear_indice(nombre_indice, dimension=generador.dimension)
+        crear_indice(pc, nombre_indice, dimension=generador.dimension)
         
         # 4. Poblar índice con datos de ejemplo
-        poblar_indice_ejemplo(nombre_indice, generador)
+        poblar_indice_ejemplo(pc, nombre_indice, generador)
         
         # 5. Mostrar estadísticas
-        obtener_estadisticas_indice(nombre_indice)
+        obtener_estadisticas_indice(pc, nombre_indice)
         
         # 6. Realizar búsquedas de ejemplo
-        buscar_con_filtros_ejemplo(nombre_indice, generador)
+        buscar_con_filtros_ejemplo(pc, nombre_indice, generador)
         
         # 7. Búsqueda personalizada
         print("\n🎯 BÚSQUEDA PERSONALIZADA")
         print("=" * 30)
         consulta_personalizada = "¿Qué son las redes neuronales?"
         resultados = buscar_documentos_similares(
+            pc,
             nombre_indice, 
             consulta_personalizada, 
             generador,

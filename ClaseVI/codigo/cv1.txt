@@ -1,0 +1,1 @@
+Nombre: Gaspar | Apellido: Acevedo Zain | Fecha Nacimiento: 19/01/1993 | Experiencia 1: Lugar de trabajo 1, realizando tareas de desarollo con C# | Experiencia 2: Lugar de trabajo 2, realizando tareas de desarollo con Java | Experiencia 3: Lugar de trabajo 3, realizando tareas de desarollo con Javascript, C#, SQL

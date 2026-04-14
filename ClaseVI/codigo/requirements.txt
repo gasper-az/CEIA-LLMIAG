@@ -1,11 +1,11 @@
 transformers
 Pillow
 torch
-groq
-streamlit
-langchain
-langchain_core
-langchain_groq
+groq==0.11.0
+streamlit==1.39.0
+langchain==0.2.17
+langchain_core==0.2.43
+langchain_groq==0.1.10
 numpy
 pinecone
 sentence-transformers
